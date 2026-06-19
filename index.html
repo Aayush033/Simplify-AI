@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Summarizer with History</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #FFF7ED;
+            color: #333;
+            display: flex;
+            /* Creates the side-by-side layout */
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Sidebar Styles --- */
+        .sidebar {
+            width: 280px;
+            background-color: #FFFFFF;
+            border-right: 1px solid #FED7AA;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .sidebar h2 {
+            color: #FB923C;
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #FFEDD5;
+        }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .history-item {
+            background: #FFF7ED;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid #FED7AA;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            /* Puts "..." for long text */
+            transition: all 0.2s ease;
+        }
+
+        .history-item:hover {
+            background: #FFEDD5;
+            border-color: #F97316;
+        }
+
+        .clear-btn {
+            margin-top: 15px;
+            background-color: #EF4444;
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .clear-btn:hover {
+            background-color: #DC2626;
+        }
+
+        /* --- Main Content Area Styles --- */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: #fff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            align-self: flex-start;
+        }
+
+        h1 {
+            text-align: center;
+            color: #FB923C;
+            margin-top: 0;
+        }
+
+        h3 {
+            text-align: center;
+            margin-top: -10px;
+            margin-bottom: 30px;
+            color: #6B7280;
+            font-size: 16px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        textarea {
+            height: 180px;
+            padding: 12px;
+            border: 1px solid #CBD5E1;
+            border-radius: 6px;
+            font-size: 16px;
+            resize: vertical;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #FB923C;
+        }
+
+        button.submit-btn {
+            background-color: #FB923C;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        button.submit-btn:hover {
+            background-color: #F97316;
+        }
+
+        button.submit-btn:disabled {
+            background-color: #FED7AA;
+            cursor: not-allowed;
+        }
+
+        #summary-output {
+            margin-top: 25px;
+            background: #FFEDD5;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #FED7AA;
+            display: none;
+            /* Hidden by default */
+        }
+
+        #summary-heading {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #C2410C;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <h2>Past Summaries</h2>
+        <div id="history-list" class="history-list">
+        </div>
+        <button id="clear-history" class="clear-btn">Clear History</button>
+    </div>
+
+    <div class="main-content">
+        <div class="container">
+            <h1>Text Summarizer</h1>
+            <h3>using HuggingFace Transformer</h3>
+            <p>Write or Paste your content below for quick summarization.</p>
+
+            <form id="summarization-form">
+                <textarea id="dialogue-input" placeholder="Enter your content here..." required></textarea>
+                <button type="submit" class="submit-btn">Summarize</button>
+            </form>
+
+            <div id="summary-output">
+                <h3 id="summary-heading">Content Summary</h3>
+                <p id="summary-text"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Array to hold our history items locally
+        let summaryHistory = JSON.parse(localStorage.getItem("summaryHistory")) || [];
+
+        const form = document.getElementById("summarization-form");
+        const dialogueInput = document.getElementById("dialogue-input");
+        const summaryOutput = document.getElementById("summary-output");
+        const summaryText = document.getElementById("summary-text");
+        const historyList = document.getElementById("history-list");
+        const clearBtn = document.getElementById("clear-history");
+
+        // Initial setup: Render any items stored from previous sessions
+        renderHistory();
+
+        // 1. HANDLE FORM SUBMISSION (CALL API)
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const dialogue = dialogueInput.value.trim();
+            if (!dialogue) return;
+
+            // Display loading state
+            summaryOutput.style.display = "block";
+            summaryText.innerText = "Processing...";
+            const submitButton = form.querySelector(".submit-btn");
+            submitButton.disabled = true;
+
+            try {
+                const response = await fetch("/summarize/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ dialogue }),
+                });
+
+                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+                const data = await response.json();
+                const summary = data.summary || "No summary returned.";
+
+                // Render the output in the view
+                summaryText.innerText = summary;
+
+                // Save to history list
+                saveToHistory(dialogue, summary);
+
+            } catch (err) {
+                summaryText.innerText = `Error: ${err.message}`;
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+
+        // 2. SAVE ITEM TO HISTORY Array & LocalStorage
+        function saveToHistory(dialogue, summary) {
+            const newItem = {
+                id: Date.now(),
+                title: dialogue.substring(0, 35) + (dialogue.length > 35 ? "..." : ""), // Sneak peek title
+                dialogue: dialogue,
+                summary: summary
+            };
+
+            // Add to the front of the history array
+            summaryHistory.unshift(newItem);
+
+            // Limit history to last 20 items so it doesn't get cluttered
+            if (summaryHistory.length > 20) summaryHistory.pop();
+
+            localStorage.setItem("summaryHistory", JSON.stringify(summaryHistory));
+            renderHistory();
+        }
+
+        // 3. RENDER HISTORY LIST IN SIDEBAR
+        function renderHistory() {
+            historyList.innerHTML = "";
+
+            if (summaryHistory.length === 0) {
+                historyList.innerHTML = `<p style="color: #9CA3AF; font-size: 13px; text-align: center; margin-top: 20px;">No history yet</p>`;
+                return;
+            }
+
+            summaryHistory.forEach(item => {
+                const div = document.createElement("div");
+                div.className = "history-item";
+                div.innerText = item.title;
+
+                // Clicking a history item populates fields instantly without hitting API
+                div.addEventListener("click", () => {
+                    dialogueInput.value = item.dialogue;
+                    summaryText.innerText = item.summary;
+                    summaryOutput.style.display = "block";
+                });
+
+                historyList.appendChild(div);
+            });
+        }
+
+        // 4. CLEAR ENTIRE HISTORY
+        clearBtn.addEventListener("click", () => {
+            if (confirm("Are you sure you want to clear your history?")) {
+                summaryHistory = [];
+                localStorage.removeItem("summaryHistory");
+                renderHistory();
+
+                // Clear the workspace view too
+                dialogueInput.value = "";
+                summaryText.innerText = "";
+                summaryOutput.style.display = "none";
+            }
+        });
+    </script>
+</body>
+
+</html>

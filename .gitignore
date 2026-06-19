@@ -1,0 +1,5 @@
+saved_summary_model/
+__pycache__/
+venv/
+.env
+.DS_Store
